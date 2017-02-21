@@ -11,8 +11,8 @@
 #include <asm/arch/regs-gpio.h>
 #include <asm/hardware.h>
 
-static struct class *third_drv_class;
-static struct class_device	*third_drv_class_dev;
+static struct class *buttons_drv_class;
+static struct class_device	*buttons_drv_class_dev;
 
 static volatile unsigned long *gpfcon = NULL;
 static volatile unsigned long *gpfdat = NULL;
@@ -20,9 +20,9 @@ static volatile unsigned long *gpfdat = NULL;
 static volatile unsigned long *gpgcon = NULL;
 static volatile unsigned long *gpgdat = NULL;
 
-static DECLARE_WAIT_QUEUE_HEAD(button_waitq);			/*定义一个等待队列头*/
+static DECLARE_WAIT_QUEUE_HEAD(button_waitq);
 
-/* 中断事件标志, 中断服务程序将它置1，third_drv_read将它清0 */
+/* 中断事件标志, 中断服务程序将它置1，buttons_drv_read将它清0 */
 static volatile int ev_press = 0;
 
 struct pin_desc{
@@ -42,7 +42,7 @@ struct pin_desc	pins_desc[4]={
 };
 
 /*
- *中断处理函数：确定按键值
+ *确定按键值
  *
 */
 static irqreturn_t buttons_irp(int irq, void *dev_id)
@@ -61,13 +61,13 @@ static irqreturn_t buttons_irp(int irq, void *dev_id)
 		key_val = pindec->key_val;
 	}
 
-	ev_press = 1;							//表示中断发生了
+	ev_press = 1;					//表示中断发生了
 	wake_up_interruptible(&button_waitq);	//唤醒休眠的进程
 
 	return IRQ_RETVAL(IRQ_HANDLED);
 }
 
-static int third_drv_open(struct inode *inode, struct file *file)
+static int buttons_drv_open(struct inode *inode, struct file *file)
 {
 	/*配置GPF0,2为输入引脚*/
 	/*配置GPG3,11为输入引脚*/
@@ -79,13 +79,13 @@ static int third_drv_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-// static ssize_t third_drv_write(struct file *file, const char __user *buf, size_t count, loff_t * ppos)
+// static ssize_t buttons_drv_write(struct file *file, const char __user *buf, size_t count, loff_t * ppos)
 // {
 
 // 	return 0;
 // }
 
-ssize_t third_drv_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
+ssize_t buttons_drv_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
 {
 	if(size != 1)
 		return -EINVAL;
@@ -93,14 +93,12 @@ ssize_t third_drv_read(struct file *file, char __user *buf, size_t size, loff_t 
 	wait_event_interruptible(button_waitq, ev_press);
 	/*如果有按键动作发生，返回键值*/
 	copy_to_user(buf, &key_val, 1);
-
-	/*可以运行到这里，说明程序已经被唤醒，为了下次还能进入休眠，把条件请0*/
 	ev_press = 0;
 
 	return 1;
 }
 
-static third_drv_release(struct inode *inode, struct file *file)
+static buttons_drv_release(struct inode *inode, struct file *file)
 {
 	//释放中断
 	free_irq(IRQ_EINT0,  &pins_desc[0]);
@@ -112,48 +110,46 @@ static third_drv_release(struct inode *inode, struct file *file)
 }
 
 
-static struct file_operations third_drv_fops = {
+static struct file_operations buttons_drv_fops = {
     .owner   =   THIS_MODULE,    /* 这是一个宏，推向编译模块时自动创建的__this_module变量 */
-    .open    =   third_drv_open, 
-    .read 	 =	 third_drv_read,
-	// .write	 =	 third_drv_write,
-	.release = 	 third_drv_release, 
+    .open    =   buttons_drv_open, 
+    .read 	 =	 buttons_drv_read,
+	// .write	 =	 buttons_drv_write,
+	.release = 	 buttons_drv_release, 
 };
 
 int major = 0;		//主设备号
-static int third_drv_init(void)
+static int buttons_drv_init(void)
 {
-	//注册驱动程序
-	major = register_chrdev(major, "third_drv", &third_drv_fops);
+	major = register_chrdev(0, "buttons_drv", &buttons_drv_fops);//注册驱动程序
 
-	//自动创建设备节点
-	third_drv_class = class_create(THIS_MODULE, "third_drv");
-	third_drv_class_dev = class_device_create(third_drv_class, NULL, MKDEV(major, 0), NULL, "third_drv");
+	buttons_drv_class = class_create(THIS_MODULE, "buttons_drv");
 
-	//内存地址映射
-	gpfcon = (volatile unsigned long *)ioremap(0x56000050, 16);		
+	buttons_drv_class_dev = class_device_create(buttons_drv_class, NULL, MKDEV(major, 0), NULL, "buttons_drv");//创建设备节点/dev/firstdrv
+
+	gpfcon = (volatile unsigned long *)ioremap(0x56000050, 16);		//内存地址映射
 	gpfdat = gpfcon + 1;
-	gpgcon = (volatile unsigned long *)ioremap(0x56000060, 16);
-	gpgdat = gpgcon + 1;
 
+	gpgcon = (volatile unsigned long *)ioremap(0x56000060, 16);		//内存地址映射
+	gpgdat = gpgcon + 1;
 	return 0;
 }
 
-static void third_drv_exit(void)
+static void buttons_drv_exit(void)
 {
-	unregister_chrdev(major, "third_drv");
+	unregister_chrdev(major, "buttons_drv");
 
-	class_device_unregister(third_drv_class_dev);
+	class_device_unregister(buttons_drv_class_dev);
 
-	class_destroy(third_drv_class);
+	class_destroy(buttons_drv_class);
 
 	iounmap(gpfcon);			//解除内存映射
 	iounmap(gpgcon);			//解除内存映射
 	return;
 }
 
-module_init(third_drv_init);//修饰注册驱动程序
-module_exit(third_drv_exit);//修饰卸载驱动程序
+module_init(buttons_drv_init);//修饰注册驱动程序
+module_exit(buttons_drv_exit);//修饰卸载驱动程序
 
 /* 描述驱动程序的一些信息，不是必须的 */
 MODULE_AUTHOR("xuxin_in_15#351");

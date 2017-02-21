@@ -5,14 +5,16 @@
 #include <linux/delay.h>
 #include <linux/irq.h>
 #include <linux/kdev_t.h>
+#include <linux/poll.h>
 #include <asm/uaccess.h>
 #include <asm/irq.h>
 #include <asm/io.h>
 #include <asm/arch/regs-gpio.h>
 #include <asm/hardware.h>
 
-static struct class *third_drv_class;
-static struct class_device	*third_drv_class_dev;
+
+static struct class *forth_drv_class;
+static struct class_device	*forth_drv_class_dev;
 
 static volatile unsigned long *gpfcon = NULL;
 static volatile unsigned long *gpfdat = NULL;
@@ -22,7 +24,7 @@ static volatile unsigned long *gpgdat = NULL;
 
 static DECLARE_WAIT_QUEUE_HEAD(button_waitq);			/*定义一个等待队列头*/
 
-/* 中断事件标志, 中断服务程序将它置1，third_drv_read将它清0 */
+/* 中断事件标志, 中断服务程序将它置1，forth_drv_read将它清0 */
 static volatile int ev_press = 0;
 
 struct pin_desc{
@@ -67,7 +69,7 @@ static irqreturn_t buttons_irp(int irq, void *dev_id)
 	return IRQ_RETVAL(IRQ_HANDLED);
 }
 
-static int third_drv_open(struct inode *inode, struct file *file)
+static int forth_drv_open(struct inode *inode, struct file *file)
 {
 	/*配置GPF0,2为输入引脚*/
 	/*配置GPG3,11为输入引脚*/
@@ -79,13 +81,13 @@ static int third_drv_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-// static ssize_t third_drv_write(struct file *file, const char __user *buf, size_t count, loff_t * ppos)
+// static ssize_t forth_drv_write(struct file *file, const char __user *buf, size_t count, loff_t * ppos)
 // {
 
 // 	return 0;
 // }
 
-ssize_t third_drv_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
+ssize_t forth_drv_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
 {
 	if(size != 1)
 		return -EINVAL;
@@ -100,7 +102,7 @@ ssize_t third_drv_read(struct file *file, char __user *buf, size_t size, loff_t 
 	return 1;
 }
 
-static third_drv_release(struct inode *inode, struct file *file)
+static forth_drv_release(struct inode *inode, struct file *file)
 {
 	//释放中断
 	free_irq(IRQ_EINT0,  &pins_desc[0]);
@@ -111,24 +113,38 @@ static third_drv_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+static unsigned int forth_drv_poll(struct file *file, struct poll_table_struct *wait)
+{
+	unsigned int mask = 0;
+	poll_wait(file, &button_waitq, wait);		//将进程挂到button_waitq等待队列中，不会立即休眠
 
-static struct file_operations third_drv_fops = {
+	if(ev_press)
+	{
+		mask |= POLLIN | POLLRDNORM;
+	}
+
+	return mask;
+}
+
+static struct file_operations forth_drv_fops = {
     .owner   =   THIS_MODULE,    /* 这是一个宏，推向编译模块时自动创建的__this_module变量 */
-    .open    =   third_drv_open, 
-    .read 	 =	 third_drv_read,
-	// .write	 =	 third_drv_write,
-	.release = 	 third_drv_release, 
+    .open    =   forth_drv_open, 
+    .read 	 =	 forth_drv_read,
+	// .write	 =	 forth_drv_write,
+	.release = 	 forth_drv_release, 
+	.poll 	 =	 forth_drv_poll,
+
 };
 
 int major = 0;		//主设备号
-static int third_drv_init(void)
+static int forth_drv_init(void)
 {
 	//注册驱动程序
-	major = register_chrdev(major, "third_drv", &third_drv_fops);
+	major = register_chrdev(major, "forth_drv", &forth_drv_fops);
 
 	//自动创建设备节点
-	third_drv_class = class_create(THIS_MODULE, "third_drv");
-	third_drv_class_dev = class_device_create(third_drv_class, NULL, MKDEV(major, 0), NULL, "third_drv");
+	forth_drv_class = class_create(THIS_MODULE, "forth_drv");
+	forth_drv_class_dev = class_device_create(forth_drv_class, NULL, MKDEV(major, 0), NULL, "forth_drv");
 
 	//内存地址映射
 	gpfcon = (volatile unsigned long *)ioremap(0x56000050, 16);		
@@ -139,24 +155,24 @@ static int third_drv_init(void)
 	return 0;
 }
 
-static void third_drv_exit(void)
+static void forth_drv_exit(void)
 {
-	unregister_chrdev(major, "third_drv");
+	unregister_chrdev(major, "forth_drv");
 
-	class_device_unregister(third_drv_class_dev);
+	class_device_unregister(forth_drv_class_dev);
 
-	class_destroy(third_drv_class);
+	class_destroy(forth_drv_class);
 
 	iounmap(gpfcon);			//解除内存映射
 	iounmap(gpgcon);			//解除内存映射
 	return;
 }
 
-module_init(third_drv_init);//修饰注册驱动程序
-module_exit(third_drv_exit);//修饰卸载驱动程序
+module_init(forth_drv_init);//修饰注册驱动程序
+module_exit(forth_drv_exit);//修饰卸载驱动程序
 
 /* 描述驱动程序的一些信息，不是必须的 */
 MODULE_AUTHOR("xuxin_in_15#351");
 MODULE_VERSION("0.1.0");
-MODULE_DESCRIPTION("S3C2410/S3C2440 third Driver");
+MODULE_DESCRIPTION("S3C2410/S3C2440 forth Driver");
 MODULE_LICENSE("GPL");		//遵循GPL协议
