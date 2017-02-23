@@ -39,7 +39,7 @@ int main(int argc, char *argv[])
 
 	fcntl(fd, F_SETOWN, (pid=getpid()));	//通知内核要将信号发给那个进程
 	oflags = fcntl(fd, F_GETFL);			//
-	fcntl(fd, F_GETFL, oflags | FASYNC);	//
+	fcntl(fd, F_SETFL, oflags | FASYNC);	//
 
 	printf("The pid of process is %d\n", pid);
 

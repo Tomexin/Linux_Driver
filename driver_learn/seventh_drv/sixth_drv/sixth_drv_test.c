@@ -12,7 +12,8 @@
  * */
 
 int fd;
-
+unsigned char key_val;
+#if 0
 void my_signal_fun(int signum)
 {
 	unsigned char key_val;
@@ -20,6 +21,7 @@ void my_signal_fun(int signum)
 	printf("-----------------------\n");
 	printf("key_val : 0x%x\n", key_val);
 }
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -28,24 +30,25 @@ int main(int argc, char *argv[])
 	int oflags = 0;
 	int ret;
 
-	signal(SIGIO, my_signal_fun);		//应用程序注册信号处理函数
+	//signal(SIGIO, my_signal_fun);		//应用程序注册信号处理函数
 
-	fd = open("/dev/sixth_drv", O_RDWR);
+	fd = open("/dev/sixth_drv", O_RDWR|O_NONBLOCK);
 	if(fd<0)
 	{	
 		printf("open sixth_drv fail\n");
 		return -1;
 	}
 
-	fcntl(fd, F_SETOWN, (pid=getpid()));	//通知内核要将信号发给那个进程
-	oflags = fcntl(fd, F_GETFL);			//
-	fcntl(fd, F_GETFL, oflags | FASYNC);	//
-
-	printf("The pid of process is %d\n", pid);
+	// fcntl(fd, F_SETOWN, (pid=getpid()));	//通知内核要将信号发给那个进程
+	// oflags = fcntl(fd, F_GETFL);			//
+	// fcntl(fd, F_GETFL, oflags | FASYNC);	//
+	//printf("The pid of process is %d\n", pid);
 
 	while(1)
 	{
-		sleep(1000);
+		ret = read(fd, &key_val, 1);
+		printf("key_val : 0x%x; ret : %d\n", key_val, ret);
+		sleep(5);
 	}
 
 	return 0;

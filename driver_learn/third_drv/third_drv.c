@@ -159,4 +159,4 @@ module_exit(third_drv_exit);//修饰卸载驱动程序
 MODULE_AUTHOR("xuxin_in_15#351");
 MODULE_VERSION("0.1.0");
 MODULE_DESCRIPTION("S3C2410/S3C2440 third Driver");
-MODULE_LICENSE("GPL");		//遵循GPL协议
+MODULE_LICENSE("GPL");		//遵循GPL协议 

@@ -29,12 +29,12 @@ static volatile unsigned long *gpfdat = NULL;
 static volatile unsigned long *gpgcon = NULL;
 static volatile unsigned long *gpgdat = NULL;
 
-//static DECLARE_WAIT_QUEUE_HEAD(button_waitq);			/*定义一个等待队列头*/
+static DECLARE_WAIT_QUEUE_HEAD(button_waitq);			/*定义一个等待队列头*/
 
 /* 中断事件标志, 中断服务程序将它置1，sixth_drv_read将它清0 */
-//static volatile int ev_press = 0;
+static volatile int ev_press = 0;
 
-static struct fasync_struct *button_async;
+//static struct fasync_struct *button_async;
 
 struct pin_desc{
 	unsigned int pin;
@@ -53,8 +53,9 @@ struct pin_desc	pins_desc[4]={
 };
 
 //static int canopen = 1;
-static atomic_t canopen = ATOMIC_INIT(1);			//定义变量cabopen为原子变量，并初始化为1
-
+//static atomic_t canopen = ATOMIC_INIT(1);			//定义变量cabopen为原子变量，并初始化为1
+static DECLARE_MUTEX(button_lock);					//定义信号量互斥锁:定义了信号量，并初始化为1
+ 
 /*
  *中断处理函数：确定按键值
  *
@@ -77,10 +78,10 @@ static irqreturn_t buttons_irp(int irq, void *dev_id)
 		key_val = pindec->key_val;
 	}
 
-	//ev_press = 1;							//表示中断发生了
-	//wake_up_interruptible(&button_waitq);	//唤醒休眠的进程
+	ev_press = 1;							//表示中断发生了
+	wake_up_interruptible(&button_waitq);	//唤醒休眠的进程
 
-	kill_fasync(&button_async,SIGIO,POLL_IN); //检测到中断，给应用程序发送SIGIO信号
+	//kill_fasync(&button_async,SIGIO,POLL_IN); //检测到中断，给应用程序发送SIGIO信号
 
 	return IRQ_RETVAL(IRQ_HANDLED);
 }
@@ -88,13 +89,27 @@ static irqreturn_t buttons_irp(int irq, void *dev_id)
 static int sixth_drv_open(struct inode *inode, struct file *file)
 {
 	int request_irq_return_value[4];
-
 	printk("sixth_drv_open() is called\n");
+
+	if(file->f_flags & O_NONBLOCK)
+	{
+		//非阻塞
+		if(down_trylock(&button_lock))
+			return EBUSY;
+	}
+	else
+	{
+		/*获取信号量*/
+		down(&button_lock);
+	}
+
+#if 0	
 	if(!atomic_dec_and_test(&canopen))		//原子操作：自减1后检查是否为0，为0返回TRUE，不为0返回false	
 	{
 		atomic_inc(&canopen);			//原子变量canopen自加1
 		return -EBUSY;
 	}
+#endif
 
 	/*配置GPF0,2为输入引脚*/
 	/*配置GPG3,11为输入引脚*/
@@ -117,23 +132,34 @@ static int sixth_drv_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-// static ssize_t sixth_drv_write(struct file *file, const char __user *buf, size_t count, loff_t * ppos)
-// {
-
-// 	return 0;
-// }
+static ssize_t sixth_drv_write(struct file *file, const char __user *buf, size_t count, loff_t * ppos)
+{
+	printk("sixth_drv_write() is called\n");
+	return 0;
+}
 
 ssize_t sixth_drv_read(struct file *file, char __user *buf, size_t size, loff_t *ppos)
 {
 	if(size != 1)
 		return -EINVAL;
-	/*如果没有按键动作发生，休眠*/
-	//wait_event_interruptible(button_waitq, ev_press);
+
+	if(file->f_flags & O_NONBLOCK)
+	{
+		//非阻塞,直接返回
+		if(!ev_press)
+			return -EAGAIN;
+	}
+	else
+	{
+		//阻塞，进入休眠状态
+		/*如果没有按键动作发生，休眠*/
+		wait_event_interruptible(button_waitq, ev_press);
+	}
 	/*如果有按键动作发生，返回键值*/
 	copy_to_user(buf, &key_val, 1);
 
 	/*可以运行到这里，说明程序已经被唤醒，为了下次还能进入休眠，把条件请0*/
-	//ev_press = 0;
+	ev_press = 0;
 
 	return 1;
 }
@@ -141,7 +167,8 @@ ssize_t sixth_drv_read(struct file *file, char __user *buf, size_t size, loff_t 
 static int sixth_drv_release(struct inode *inode, struct file *file)
 {
 
-	atomic_inc(&canopen);			//原子变量canopen自加1, 释放改原子变量
+	//atomic_inc(&canopen);			//原子变量canopen自加1, 释放改原子变量
+	up(&button_lock);				//释放信号量
 
 	//释放中断
 	free_irq(IRQ_EINT0,  &pins_desc[0]);
@@ -153,34 +180,34 @@ static int sixth_drv_release(struct inode *inode, struct file *file)
 
 }
 
-// static unsigned int sixth_drv_poll(struct file *file, struct poll_table_struct *wait)
-// {
-// 	unsigned int mask = 0;
-// 	poll_wait(file, &button_waitq, wait);		//将进程挂到button_waitq等待队列中，不会立即休眠
-
-// 	if(ev_press)
-// 	{
-// 		mask |= POLLIN | POLLRDNORM;
-// 	}
-
-// 	return mask;
-// }
-
-static int sixth_drv_fasync(int fd, struct file *filp, int on)
+static unsigned int sixth_drv_poll(struct file *file, struct poll_table_struct *wait)
 {
-	printk("driver:sixth_drv_fasync\n");
-	return fasync_helper (fd, filp, on, &button_async);
+	unsigned int mask = 0;
+	poll_wait(file, &button_waitq, wait);		//将进程挂到button_waitq等待队列中，不会立即休眠
+
+	if(ev_press)
+	{
+		mask |= POLLIN | POLLRDNORM;
+	}
+
+	return mask;
 }
+
+// static int sixth_drv_fasync(int fd, struct file *filp, int on)
+// {
+// 	printk("driver:sixth_drv_fasync\n");
+// 	return fasync_helper (fd, filp, on, &button_async);
+// }
 
 
 static struct file_operations sixth_drv_fops = {
     .owner   =   THIS_MODULE,    /* 这是一个宏，推向编译模块时自动创建的__this_module变量 */
     .open    =   sixth_drv_open, 
     .read 	 =	 sixth_drv_read,
-	// .write	 =	 sixth_drv_write,
+	.write	 =	 sixth_drv_write,
 	.release = 	 sixth_drv_release, 
-	//.poll 	 =	 sixth_drv_poll,
-	.fasync  =	 sixth_drv_fasync,
+	.poll 	 =	 sixth_drv_poll,
+	//.fasync  =	 sixth_drv_fasync,
 };
 
 int major = 0;		//主设备号
