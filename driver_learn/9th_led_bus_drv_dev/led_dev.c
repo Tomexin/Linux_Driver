@@ -35,22 +35,29 @@ static struct resource led_resource[] = {
 	[0] = {
 		.start = 0x56000050,
 		.end   = 0x56000050+8-1,
-		.flag  = IORESOURCE_MEM,
+		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
 		.start = 4,
 		.end   = 4,
-		.flag  = IORESOURCE_IRQ,
-	}
+		.flags  = IORESOURCE_IRQ,
+	},
+};
+
+static void led_device_release(struct device * dev)
+{
+return; 
 }
+
 
 static struct platform_device led_dev = {
 	.name			= "myled",
 	.id				= -1,
 	.num_resources	= ARRAY_SIZE(led_resource),
 	.resource 		= led_resource,
-	
-	
+	.dev			= {
+		.release	= led_device_release,
+	},
 };
 
 static int led_dev_init(void)
