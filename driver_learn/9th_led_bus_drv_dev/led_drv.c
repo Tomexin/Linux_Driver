@@ -122,7 +122,7 @@ struct platform_driver led_drv = {
 	.remove 	= led_remove,
 	.driver 	={
 		.name 		= "myled",		//平台驱动层.driver下的name要和平台设备层保持一致
-	}
+	},
 };
 
 
@@ -142,5 +142,4 @@ module_exit(led_drv_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Tomxin in 15#351");
-
 

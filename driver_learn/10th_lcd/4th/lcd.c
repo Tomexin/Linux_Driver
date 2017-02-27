@@ -22,6 +22,9 @@
 #include <asm/arch/regs-gpio.h>
 #include <asm/arch/fb.h>
 
+static int s3c_lcdfb_setcolreg(unsigned int regno, unsigned int red, unsigned int green, unsigned int blue,
+			 unsigned int transp, struct fb_info *info);
+
 
 struct lcd_regs{
 	unsigned long lcdcon1;
@@ -47,7 +50,7 @@ struct lcd_regs{
 
 static struct fb_ops s3c_lcdfb_ops = {
 	.owner			= THIS_MODULE,
-	.fb_setcolreg	= mc68x328fb_setcolreg,
+	.fb_setcolreg	= s3c_lcdfb_setcolreg,
 	.fb_fillrect	= cfb_fillrect,
 	.fb_copyarea	= cfb_copyarea,
 	.fb_imageblit	= cfb_imageblit,
@@ -85,8 +88,9 @@ static int s3c_lcdfb_setcolreg(unsigned int regno, unsigned int red, unsigned in
 	val |= chan_to_field(green, &info->var.green);
 	val |= chan_to_field(blue,  &info->var.blue);
 
- 	((unsigned long *)(info->pseudo_palette))[regno] = val;
-
+ 	((unsigned long *)(pseudo_palette))[regno] = val;
+ 	
+ 	return 0;
  }
 
 static int lcd_init(void)
@@ -121,10 +125,10 @@ static int lcd_init(void)
  	s3c_lcd->var.activate		= FB_ACTIVATE_NOW;
 
 	/*2.3、设置操作函数*/
-	s3c_lcd->fb_ops				= &s3c_lcdfb_ops;
+	s3c_lcd->fbops				= &s3c_lcdfb_ops;
 
 	/*2.4、其他设置*/
-	s3c_lcd->pseudo_palette 	= s3c_lcdfb_setcolreg;
+	s3c_lcd->pseudo_palette 	= pseudo_palette;
 	//s3c_lcd->screen_base 		=;	/* 显存的虚拟地址*/
 	s3c_lcd->screen_size		= 240*320*16/8;
 	
@@ -199,7 +203,8 @@ static int lcd_init(void)
 	lcd_regs->lcdsaddr2 = ((s3c_lcd->fix.smem_start + s3c_lcd->fix.smem_len) >> 1) & 0x1fffff;
 	lcd_regs->lcdsaddr3 = (240*16/16);	//一行的长度，单位是：2字节
 	//启动LCD
-	lcd_regs-> lcdcon1 |= (1<<0);	/*使能lcd本身*/
+	lcd_regs-> lcdcon1 |= (1<<0);	/*使能lcd控制器*/
+	lcd_regs-> lcdcon5 |= (1<<3);	//使能lcd本身
 	*gpbdat |=  0x01;				//打开背光
 	
 
@@ -211,17 +216,17 @@ static int lcd_init(void)
 	return 0;
 }
 
-statuc void lcd_exit(void)
+static void lcd_exit(void)
 {
 	unregister_framebuffer(s3c_lcd);
 	lcd_regs-> lcdcon1 &= ~(1<<0);	/*关闭lcd本身*/
 	*gpbdat &=  ~0x01;				//关闭背光
 	dma_free_writecombine(NULL, s3c_lcd->fix.smem_len, s3c_lcd->screen_base, s3c_lcd->fix.smem_start);
-	iounremap(lcd_regs);
-	iounremap(gpbcon);
-	iounremap(gpccon);
-	iounremap(gpdcon);
-	iounremap(gpgcon);
+	iounmap(lcd_regs);
+	iounmap(gpbcon);
+	iounmap(gpccon);
+	iounmap(gpdcon);
+	iounmap(gpgcon);
 	framebuffer_release(s3c_lcd);
 }
 
